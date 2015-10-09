@@ -3,7 +3,9 @@ package scheduler
 import (
 	"fmt"
 	"flag"
+	"strings"
 	"net"
+	"net/http"
 	"io/ioutil"
 
 	log "github.com/golang/glog"
@@ -21,6 +23,8 @@ import (
 var (
 	consulServer = flag.String("consul_server", "", "CloudFoundry Consul server to join")
 	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
+	artifactPort = flag.Int("artifactPort", 12345, "Binding port for artifact server")
+	executorPath = flag.String("executor", "./executor", "Path to test executor")
 	authProvider = flag.String("mesos_authentication_provider", sasl.ProviderName,
 		fmt.Sprintf("Authentication provider to use, default is SASL that supports mechanisms: %+v", mech.ListSupported()))
 	master              = flag.String("master", "127.0.0.1:5050", "Master address <ip:port>")
@@ -73,9 +77,15 @@ func InitializeScheduler(auctionRunner *AuctionRunner) *SchedulerRunner {
 }
 
 func prepareExecutorInfo() *mesos.ExecutorInfo {
+	uri, _:= serveExecutorArtifact(*executorPath)
+	executorUris := []*mesos.CommandInfo_URI{
+		&mesos.CommandInfo_URI{
+			Value: uri,
+			//Extract: proto.Bool(true),
+		},
+	}
 
-	containerType := mesos.ContainerInfo_DOCKER
-	containerNetwork := mesos.ContainerInfo_DockerInfo_HOST
+	containerType := mesos.ContainerInfo_MESOS
 	vcapDataVolumeMode := mesos.Volume_RW
 	return &mesos.ExecutorInfo{
 		ExecutorId: util.NewExecutorID("diego-executor"),
@@ -86,17 +96,13 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 			Volumes: []*mesos.Volume {
 				&mesos.Volume{
 					Mode: &vcapDataVolumeMode,
-					ContainerPath: proto.String("/var/vcap/data"),
-					HostPath: proto.String("data"),
+					ContainerPath: proto.String("/var/vcap"),
+					HostPath: proto.String("vcap"),
 				},
-			},
-			Docker: &mesos.ContainerInfo_DockerInfo{
-				Image: proto.String("jianhuiz/diego-cell"),
-				Network: &containerNetwork,
-				Privileged: proto.Bool(true),
 			},
 		},
 		Command: &mesos.CommandInfo {
+			Uris: executorUris,
 			Environment: &mesos.Environment{
 				Variables: []*mesos.Environment_Variable {
 					&mesos.Environment_Variable{
@@ -106,8 +112,8 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 				},
 			},
 			Shell: proto.Bool(false),
-			Value: proto.String("/executor"),
-			Arguments: []string{ "-logtostderr=true", "-v=5" },
+			Value: proto.String("./entrypoint.sh"),
+			Arguments: []string{ "./executor", "-logtostderr=true", "-v=5" },
 		},
 	}
 }
@@ -121,4 +127,30 @@ func parseIP(address string) net.IP {
 		log.Fatalf("failed to parse IP from address '%v'", address)
 	}
 	return addr[0]
+}
+
+// returns (downloadURI, basename(path))
+func serveExecutorArtifact(path string) (*string, string) {
+	serveFile := func(pattern string, filename string) {
+		http.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filename)
+		})
+	}
+
+	// Create base path (http://foobar:5000/<base>)
+	pathSplit := strings.Split(path, "/")
+	var base string
+	if len(pathSplit) > 0 {
+		base = pathSplit[len(pathSplit)-1]
+	} else {
+		base = path
+	}
+	serveFile("/"+base, path)
+
+	hostURI := fmt.Sprintf("http://%s:%d/%s", *address, *artifactPort, base)
+	log.V(2).Infof("Hosting artifact '%s' at '%s'", path, hostURI)
+	go http.ListenAndServe(fmt.Sprintf("%s:%d", *address, *artifactPort), nil)
+	log.V(2).Info("Serving executor artifacts...")
+
+	return &hostURI, base
 }
