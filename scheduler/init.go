@@ -20,6 +20,7 @@ import (
 
 var (
 	consulServer = flag.String("consul_server", "", "CloudFoundry Consul server to join")
+	etcdUrl = flag.String("etcd_url", "", "CloudFoundry ETCD URL")
 	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
 	authProvider = flag.String("mesos_authentication_provider", sasl.ProviderName,
 		fmt.Sprintf("Authentication provider to use, default is SASL that supports mechanisms: %+v", mech.ListSupported()))
@@ -89,6 +90,11 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 					ContainerPath: proto.String("/var/vcap/data"),
 					HostPath: proto.String("data"),
 				},
+				&mesos.Volume{
+					Mode: &vcapDataVolumeMode,
+					ContainerPath: proto.String("/sys/fs/cgroup"),
+					HostPath: proto.String("/sys/fs/cgroup"),
+				},
 			},
 			Docker: &mesos.ContainerInfo_DockerInfo{
 				Image: proto.String("jianhuiz/diego-cell"),
@@ -102,6 +108,10 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 					&mesos.Environment_Variable{
 						Name: proto.String("CONSUL_SERVER"),
 						Value: proto.String(*consulServer),
+					},
+					&mesos.Environment_Variable{
+						Name: proto.String("ETCD_URL"),
+						Value: proto.String(*etcdUrl),
 					},
 				},
 			},
