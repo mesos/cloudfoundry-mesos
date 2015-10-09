@@ -22,6 +22,7 @@ import (
 
 var (
 	consulServer = flag.String("consul_server", "", "CloudFoundry Consul server to join")
+	etcdUrl = flag.String("etcd_url", "", "CloudFoundry ETCD URL")
 	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
 	artifactPort = flag.Int("artifactPort", 12345, "Binding port for artifact server")
 	executorPath = flag.String("executor", "./executor", "Path to test executor")
@@ -108,6 +109,10 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 					&mesos.Environment_Variable{
 						Name: proto.String("CONSUL_SERVER"),
 						Value: proto.String(*consulServer),
+					},
+					&mesos.Environment_Variable{
+						Name: proto.String("ETCD_URL"),
+						Value: proto.String(*etcdUrl),
 					},
 				},
 			},
