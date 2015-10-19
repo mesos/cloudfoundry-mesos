@@ -92,6 +92,11 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 				},
 				&mesos.Volume{
 					Mode: &vcapDataVolumeMode,
+					ContainerPath: proto.String("/var/vcap/sys/log"),
+					HostPath: proto.String("log"),
+				},
+				&mesos.Volume{
+					Mode: &vcapDataVolumeMode,
 					ContainerPath: proto.String("/sys/fs/cgroup"),
 					HostPath: proto.String("/sys/fs/cgroup"),
 				},
@@ -100,6 +105,7 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 				Image: proto.String("jianhuiz/diego-cell"),
 				Network: &containerNetwork,
 				Privileged: proto.Bool(true),
+				ForcePullImage: proto.Bool(true),
 			},
 		},
 		Command: &mesos.CommandInfo {
@@ -117,7 +123,7 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 			},
 			Shell: proto.Bool(false),
 			Value: proto.String("/executor"),
-			Arguments: []string{ "-logtostderr=true", "-v=5" },
+			Arguments: []string{ "-logtostderr=true" },
 		},
 	}
 }
