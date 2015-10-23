@@ -1,7 +1,11 @@
 package scheduler
 
 import (
+	"strings"
+	"strconv"
+
 	log "github.com/golang/glog"
+
 	mesos "github.com/mesos/mesos-go/mesosproto"
 	util "github.com/mesos/mesos-go/mesosutil"
 )
@@ -32,8 +36,19 @@ func getOfferDisk(offer *mesos.Offer) float64 {
 }
 
 func logOffers(offers []*mesos.Offer) {
-	for _, offer := range offers {
-		log.Infof("Received Offer <%v> with cpus=%v mem=%v disk=%v", offer.Id.GetValue(),
-			getOfferCpu(offer), getOfferMem(offer), getOfferDisk(offer))
+	for i, offer := range offers {
+		log.Infof("Received Offer[%v] <%v> with cpus=%v mem=%v disk=%v", i,
+			offer.Id.GetValue(), getOfferCpu(offer), getOfferMem(offer), getOfferDisk(offer))
 	}
+}
+
+func guidFromTaskId(taskId string) (guid string, index int /* -1 for diego tasks */) {
+	ss := strings.SplitN(taskId, ".", 2)
+	guid = ss[0]
+	if len(ss) == 2 {
+		index, _ = strconv.Atoi(ss[1])
+	} else {
+		index = -1
+	}
+	return
 }
