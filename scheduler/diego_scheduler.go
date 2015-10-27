@@ -14,8 +14,13 @@ import (
 	"github.com/cloudfoundry-incubator/rep"
 )
 
+// TODO: how to allocate cpu since no cpu requirement in diego auction
+const taskCpuAllocation  = 0.1
+// TODO: diego calculates this number from garden network pool
+const maxContainersPerCell = 256
+
 type OfferMatch struct {
-	Offer *mesos.Offer
+	Offers []*mesos.Offer
 	LrpAuctions []auctiontypes.LRPAuction
 	TaskAuctions []auctiontypes.TaskAuction
 }
@@ -60,39 +65,39 @@ func (s *DiegoScheduler) ResourceOffers(driver sched.SchedulerDriver, offers []*
 	lrpAuctions, taskAuctions := s.collectAuctions(0)
 	matches := s.scheduler.MatchOffers(offers, lrpAuctions, taskAuctions)
 
-	for offerId, match := range(matches) {
-		if (offerId != "") {
-			offer := match.Offer
+	for slaveId, match := range(matches) {
+		if (slaveId != "") {
+			offers := match.Offers
 
 			taskInfos := []*mesos.TaskInfo{}
 			for _, lrpAuction := range(match.LrpAuctions) {
-				taskInfo := s.createLrpTaskInfo(offer, &lrpAuction)
+				taskInfo := s.createLrpTaskInfo(util.NewSlaveID(slaveId), &lrpAuction)
 				taskInfos = append(taskInfos, taskInfo)
 				results.SuccessfulLRPs = append(results.SuccessfulLRPs, lrpAuction)
-				log.Infof("scheduled lrp, lrp: %v/%v mem: %v, offer: mem: %v",
-					lrpAuction.ProcessGuid, lrpAuction.Index, lrpAuction.MemoryMB, getOfferMem(offer))
+				log.Infof("scheduled lrp, lrp: %v/%v mem: %v, offers: mem: %v",
+					lrpAuction.ProcessGuid, lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(offers))
 			}
 			for _, taskAuction := range(match.TaskAuctions) {
-				taskInfo := s.createTaskTaskInfo(offer, &taskAuction)
+				taskInfo := s.createTaskTaskInfo(util.NewSlaveID(slaveId), &taskAuction)
 				taskInfos = append(taskInfos, taskInfo)
 				results.SuccessfulTasks = append(results.SuccessfulTasks, taskAuction)
-				log.Infof("scheduled task, task: %v mem: %v, offer: mem: %v",
-					taskAuction.TaskGuid, taskAuction.MemoryMB, getOfferMem(offer))
+				log.Infof("scheduled task, task: %v mem: %v, offers: mem: %v",
+					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(offers))
 			}
 
-			driver.LaunchTasks([]*mesos.OfferID{offer.Id}, taskInfos, // offer getting declied if no tasks
+			driver.LaunchTasks(createOfferIds(offers), taskInfos, // offer getting declied if no tasks
 				&mesos.Filters{RefuseSeconds: proto.Float64(1)})
 
 		} else {
 			for _, lrpAuction := range(match.LrpAuctions) {
 				results.FailedLRPs = append(results.FailedLRPs, lrpAuction)
-				log.Warningf("schedule lrp failed, lrp: %v/%v mem: %v, offer: mem: %v",
-					lrpAuction.GetProcessGuid(), lrpAuction.Index, lrpAuction.MemoryMB, getOfferMem(match.Offer))
+				log.Warningf("schedule lrp failed, lrp: %v/%v mem: %v, offers: mem: %v",
+					lrpAuction.GetProcessGuid(), lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(match.Offers))
 			}
 			for _, taskAuction := range(match.TaskAuctions) {
 				results.FailedTasks = append(results.FailedTasks, taskAuction)
-				log.Warningf("schedule task failed, task: %v mem: %v, offer: mem: %v",
-					taskAuction.TaskGuid, taskAuction.MemoryMB, getOfferMem(match.Offer))
+				log.Warningf("schedule task failed, task: %v mem: %v, offers: mem: %v",
+					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(match.Offers))
 			}
 		}
 	}
@@ -167,16 +172,16 @@ func (s *DiegoScheduler) collectAuctions(timeout time.Duration) (
 	}
 }
 
-func (s *DiegoScheduler) createLrpTaskInfo(offer *mesos.Offer, lrpAuction *auctiontypes.LRPAuction) *mesos.TaskInfo {
+func (s *DiegoScheduler) createLrpTaskInfo(slaveId *mesos.SlaveID, lrpAuction *auctiontypes.LRPAuction) *mesos.TaskInfo {
 	work, _ := json.Marshal(rep.Work{LRPs: []rep.LRP{lrpAuction.LRP}, Tasks: []rep.Task{}})
 	taskId := mesos.TaskID{Value: proto.String(lrpAuction.Identifier())}
 	taskInfo := mesos.TaskInfo{
 		Name: proto.String(lrpAuction.Identifier()),
 		TaskId: &taskId,
-		SlaveId: offer.SlaveId,
+		SlaveId: slaveId,
 		Executor: s.executor,
 		Resources: []*mesos.Resource {
-			util.NewScalarResource("cpus", 0.1), // TODO: ??
+			util.NewScalarResource("cpus", taskCpuAllocation), // TODO: ??
 			util.NewScalarResource("mem", float64(lrpAuction.MemoryMB)),
 			util.NewScalarResource("disk", float64(lrpAuction.DiskMB)),
 		},
@@ -185,15 +190,15 @@ func (s *DiegoScheduler) createLrpTaskInfo(offer *mesos.Offer, lrpAuction *aucti
 	return &taskInfo
 }
 
-func (s *DiegoScheduler) createTaskTaskInfo(offer *mesos.Offer, taskAuction *auctiontypes.TaskAuction) *mesos.TaskInfo {				work, _ := json.Marshal(rep.Work{LRPs: []rep.LRP{}, Tasks: []rep.Task{taskAuction.Task}})
+func (s *DiegoScheduler) createTaskTaskInfo(slaveId *mesos.SlaveID, taskAuction *auctiontypes.TaskAuction) *mesos.TaskInfo {				work, _ := json.Marshal(rep.Work{LRPs: []rep.LRP{}, Tasks: []rep.Task{taskAuction.Task}})
 	taskId := mesos.TaskID{Value: proto.String(taskAuction.Identifier())}
 	taskInfo := mesos.TaskInfo{
 		Name: proto.String(taskAuction.Identifier()),
 		TaskId: &taskId,
-		SlaveId: offer.SlaveId,
+		SlaveId: slaveId,
 		Executor: s.executor,
 		Resources: []*mesos.Resource {
-			util.NewScalarResource("cpus", 0.1),
+			util.NewScalarResource("cpus", taskCpuAllocation),
 			util.NewScalarResource("mem", float64(taskAuction.MemoryMB)),
 			util.NewScalarResource("disk", float64(taskAuction.DiskMB)),
 		},

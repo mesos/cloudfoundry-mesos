@@ -42,6 +42,43 @@ func logOffers(offers []*mesos.Offer) {
 	}
 }
 
+func getOffersScalar(offers []*mesos.Offer, name string) (result float64) {
+	for _, offer := range offers {
+		result += getOfferScalar(offer, name)
+	}
+	return result
+}
+func getOffersCpu(offers []*mesos.Offer) float64 {
+	return getOffersScalar(offers, "cpus")
+}
+
+func getOffersMem(offers []*mesos.Offer) float64 {
+	return getOffersScalar(offers, "mem")
+}
+
+func getOffersDisk(offers []*mesos.Offer) float64 {
+	return getOffersScalar(offers, "disk")
+}
+
+func aggregateOffersBySlave(offers []*mesos.Offer) [][]*mesos.Offer{
+	offersMap := map[string][]*mesos.Offer{}
+	for _, offer := range offers {
+		offersMap[offer.SlaveId.GetValue()] = append(offersMap[offer.SlaveId.GetValue()], offer)
+	}
+	offerAggregates := [][]*mesos.Offer{}
+	for _, offers := range offersMap {
+		offerAggregates = append(offerAggregates, offers)
+	}
+	return offerAggregates
+}
+
+func createOfferIds(offers []*mesos.Offer) (offerIds []*mesos.OfferID) {
+	for _, offer := range offers {
+		offerIds = append(offerIds, offer.Id)
+	}
+	return offerIds
+}
+
 func guidFromTaskId(taskId string) (guid string, index int /* -1 for diego tasks */) {
 	ss := strings.SplitN(taskId, ".", 2)
 	guid = ss[0]
