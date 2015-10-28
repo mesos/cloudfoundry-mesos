@@ -72,18 +72,19 @@ func aggregateOffersBySlave(offers []*mesos.Offer) [][]*mesos.Offer{
 	return offerAggregates
 }
 
-func createOfferIds(offers []*mesos.Offer) (offerIds []*mesos.OfferID) {
+func extractOfferIds(offers []*mesos.Offer) (offerIds []*mesos.OfferID) {
 	for _, offer := range offers {
 		offerIds = append(offerIds, offer.Id)
 	}
 	return offerIds
 }
 
-func guidFromTaskId(taskId string) (guid string, index int /* -1 for diego tasks */) {
+func guidFromTaskId(taskId string) (guid string, index int32 /* -1 for diego tasks */) {
 	ss := strings.SplitN(taskId, ".", 2)
 	guid = ss[0]
 	if len(ss) == 2 {
-		index, _ = strconv.Atoi(ss[1])
+		indexInt, _ := strconv.Atoi(ss[1])
+		index = int32(indexInt)
 	} else {
 		index = -1
 	}

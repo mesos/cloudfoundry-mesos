@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	mesos "github.com/mesos/mesos-go/mesosproto"
+	util "github.com/mesos/mesos-go/mesosutil"
 
 	"github.com/cloudfoundry-incubator/auction/auctiontypes"
 	"github.com/cloudfoundry-incubator/auction/auctionrunner"
@@ -86,6 +87,10 @@ func matchLrpAuction(offerAggregates [][]*mesos.Offer, lrpAuction *auctiontypes.
 		getOffersDisk(offers) > float64(lrpAuction.DiskMB) {
 			lrpAuction.Winner = offers[0].SlaveId.GetValue();
 			lrpAuction.WaitDuration = time.Now().Sub(lrpAuction.QueueTime)
+			offers[0].Resources = append(offers[0].Resources,
+				util.NewScalarResource("mem", float64(-lrpAuction.MemoryMB)),
+				util.NewScalarResource("cpu", -taskCpuAllocation),
+				util.NewScalarResource("disk", float64(-lrpAuction.DiskMB)))
 			return i, offers
 		}
 	}
@@ -101,6 +106,10 @@ func matchTaskAuction(offerAggregates [][]*mesos.Offer, taskAuction *auctiontype
 		getOffersDisk(offers) > float64(taskAuction.DiskMB) {
 			taskAuction.Winner = offers[0].SlaveId.GetValue();
 			taskAuction.WaitDuration = time.Now().Sub(taskAuction.QueueTime)
+			offers[0].Resources = append(offers[0].Resources,
+				util.NewScalarResource("mem", float64(-taskAuction.MemoryMB)),
+				util.NewScalarResource("cpu", -taskCpuAllocation),
+				util.NewScalarResource("disk", float64(-taskAuction.DiskMB)))
 			return i, offers
 		}
 	}

@@ -31,7 +31,8 @@ type DiegoScheduler struct {
 	taskAuctions chan auctiontypes.TaskAuction
 	auctionResults chan auctiontypes.AuctionResults
 	registry *TaskRegistry
-	scheduler *BinPackScheduler
+	//scheduler *BinPackScheduler
+	scheduler *SpreadScheduler
 }
 
 func NewDiegoScheduler(exec *mesos.ExecutorInfo,
@@ -45,7 +46,8 @@ func NewDiegoScheduler(exec *mesos.ExecutorInfo,
 		taskAuctions: taskAuctions,
 		auctionResults: auctionResults,
 		registry: registry,
-		scheduler: NewBinPackScheduler(registry),
+		//scheduler: NewBinPackScheduler(registry),
+		scheduler: NewSpreadScheduler(registry),
 	}
 }
 
@@ -85,7 +87,7 @@ func (s *DiegoScheduler) ResourceOffers(driver sched.SchedulerDriver, offers []*
 					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(offers))
 			}
 
-			driver.LaunchTasks(createOfferIds(offers), taskInfos, // offer getting declied if no tasks
+			driver.LaunchTasks(extractOfferIds(offers), taskInfos, // offer getting declied if no tasks
 				&mesos.Filters{RefuseSeconds: proto.Float64(1)})
 
 		} else {
@@ -123,12 +125,12 @@ func (s *DiegoScheduler) StatusUpdate(driver sched.SchedulerDriver, status *meso
 			s.registry.AddTask(status.SlaveId.GetValue(), guid, *status.State)
 		}
 	case mesos.TaskState_TASK_ERROR:
-		// this happens when launching task to slow while diego re-initiated the auction
+		// this happens when launching task too slow while diego re-initiated the auction
 		// task will fail due to duplicated task id
 		// in this case do not remove task from registry
-		// or the task launch failed where it has not been put into registry
+		// or the task launch simply failed where it has not been put into registry
 		// TODO: should not launch task in such case
-		if *status.Reason == mesos.TaskStatus_REASON_TASK_INVALID { break }
+		if *status.Source == mesos.TaskStatus_SOURCE_MASTER { break }
 		fallthrough
 	default:
 		if index >= 0 {
