@@ -21,6 +21,7 @@ import (
 var (
 	consulServer = flag.String("consul_server", "", "CloudFoundry Consul server to join")
 	etcdUrl = flag.String("etcd_url", "", "CloudFoundry ETCD URL")
+	auctionStrategy = flag.String("auction_strategy", "binpack", "<binpadk|spread> Strategy when scheduling auctions")
 	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
 	authProvider = flag.String("mesos_authentication_provider", sasl.ProviderName,
 		fmt.Sprintf("Authentication provider to use, default is SASL that supports mechanisms: %+v", mech.ListSupported()))
