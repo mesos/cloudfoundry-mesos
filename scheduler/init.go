@@ -50,7 +50,7 @@ func InitializeScheduler(auctionRunner *AuctionRunner) *SchedulerRunner {
 	}
 	bindingAddress := parseIP(*address)
 
-	digoScheduler := NewDiegoScheduler(exec, auctionRunner.LrpAuctions, auctionRunner.TaskAuctions, auctionRunner.AuctionResults)
+	digoScheduler := NewDiegoScheduler(exec, auctionRunner)
 	config := sched.DriverConfig{
 		Scheduler:      digoScheduler,
 		Framework:      fwinfo,

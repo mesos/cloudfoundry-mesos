@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"time"
+	"sync"
 	"encoding/json"
 
 	"github.com/gogo/protobuf/proto"
@@ -27,24 +28,24 @@ type OfferMatch struct {
 
 type DiegoScheduler struct {
 	executor     *mesos.ExecutorInfo
-	lrpAuctions  chan auctiontypes.LRPAuction
-	taskAuctions chan auctiontypes.TaskAuction
-	auctionResults chan auctiontypes.AuctionResults
+	auctionRunner *AuctionRunner
+
+	holdOffer bool
+	offers []*mesos.Offer
+	offersLock sync.RWMutex
+
 	registry *TaskRegistry
+
 	//scheduler *BinPackScheduler
 	scheduler *SpreadScheduler
+	driver sched.SchedulerDriver
 }
 
-func NewDiegoScheduler(exec *mesos.ExecutorInfo,
-	lrpAuctions  chan auctiontypes.LRPAuction, taskAuctions chan auctiontypes.TaskAuction,
-	auctionResults chan auctiontypes.AuctionResults,
-) *DiegoScheduler {
+func NewDiegoScheduler(exec *mesos.ExecutorInfo, auctionRunner *AuctionRunner) *DiegoScheduler {
 	registry := NewTaskRegistry()
 	return &DiegoScheduler{
 		executor: exec,
-		lrpAuctions: lrpAuctions,
-		taskAuctions: taskAuctions,
-		auctionResults: auctionResults,
+		auctionRunner: auctionRunner,
 		registry: registry,
 		//scheduler: NewBinPackScheduler(registry),
 		scheduler: NewSpreadScheduler(registry),
@@ -53,6 +54,8 @@ func NewDiegoScheduler(exec *mesos.ExecutorInfo,
 
 func (s *DiegoScheduler) Registered(driver sched.SchedulerDriver, frameworkId *mesos.FrameworkID, masterInfo *mesos.MasterInfo) {
 	log.Infoln("Framework Registered with Master ", masterInfo)
+	s.driver = driver
+	go s.waitingForAuctioning()
 }
 func (s *DiegoScheduler) Reregistered(driver sched.SchedulerDriver, masterInfo *mesos.MasterInfo) {
 	log.Infoln("Framework Re-Registered with Master ", masterInfo)
@@ -63,50 +66,15 @@ func (s *DiegoScheduler) Disconnected(sched.SchedulerDriver) {
 
 func (s *DiegoScheduler) ResourceOffers(driver sched.SchedulerDriver, offers []*mesos.Offer) {
 	logOffers(offers)
-	results := auctiontypes.AuctionResults{}
-	lrpAuctions, taskAuctions := s.collectAuctions(0)
-	matches := s.scheduler.MatchOffers(offers, lrpAuctions, taskAuctions)
 
-	for slaveId, match := range(matches) {
-		if (slaveId != "") {
-			offers := match.Offers
+	s.offersLock.Lock()
+	defer s.offersLock.Unlock()
 
-			taskInfos := []*mesos.TaskInfo{}
-			for _, lrpAuction := range(match.LrpAuctions) {
-				taskInfo := s.createLrpTaskInfo(util.NewSlaveID(slaveId), &lrpAuction)
-				taskInfos = append(taskInfos, taskInfo)
-				results.SuccessfulLRPs = append(results.SuccessfulLRPs, lrpAuction)
-				log.Infof("scheduled lrp, lrp: %v/%v mem: %v, offers: mem: %v",
-					lrpAuction.ProcessGuid, lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(offers))
-			}
-			for _, taskAuction := range(match.TaskAuctions) {
-				taskInfo := s.createTaskTaskInfo(util.NewSlaveID(slaveId), &taskAuction)
-				taskInfos = append(taskInfos, taskInfo)
-				results.SuccessfulTasks = append(results.SuccessfulTasks, taskAuction)
-				log.Infof("scheduled task, task: %v mem: %v, offers: mem: %v",
-					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(offers))
-			}
-
-			driver.LaunchTasks(extractOfferIds(offers), taskInfos, // offer getting declied if no tasks
-				&mesos.Filters{RefuseSeconds: proto.Float64(1)})
-
-		} else {
-			for _, lrpAuction := range(match.LrpAuctions) {
-				results.FailedLRPs = append(results.FailedLRPs, lrpAuction)
-				log.Warningf("schedule lrp failed, lrp: %v/%v mem: %v, offers: mem: %v",
-					lrpAuction.GetProcessGuid(), lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(match.Offers))
-			}
-			for _, taskAuction := range(match.TaskAuctions) {
-				results.FailedTasks = append(results.FailedTasks, taskAuction)
-				log.Warningf("schedule task failed, task: %v mem: %v, offers: mem: %v",
-					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(match.Offers))
-			}
-		}
-	}
-
-	if (len(results.SuccessfulLRPs) > 0 || len(results.FailedLRPs) > 0 ||
-		len(results.SuccessfulTasks) > 0 || len(results.FailedTasks) > 0) {
-		s.auctionResults <- results;
+	if s.holdOffer {
+		s.offers = append(s.offers, offers...)
+	} else {
+		offerIds := extractOfferIds(offers)
+		driver.LaunchTasks(offerIds, nil, &mesos.Filters{RefuseSeconds: proto.Float64(30)})
 	}
 }
 
@@ -159,19 +127,79 @@ func (s *DiegoScheduler) Error(_ sched.SchedulerDriver, err string) {
 	log.Errorf("Scheduler received error:", err)
 }
 
-func (s *DiegoScheduler) collectAuctions(timeout time.Duration) (
-		lrpAuctions []auctiontypes.LRPAuction, taskAuctions []auctiontypes.TaskAuction) {
-	if timeout > 0 { time.Sleep(timeout) }
-	for {
-		select {
-		case lrpAuction := <-s.lrpAuctions:
-			lrpAuctions = append(lrpAuctions, lrpAuction)
-		case taskAuction := <-s.taskAuctions:
-			taskAuctions = append(taskAuctions, taskAuction)
-		default:
-			return
+func (s *DiegoScheduler) schedule(lrpAuctions []auctiontypes.LRPAuction, taskAuctions []auctiontypes.TaskAuction) {
+	s.offersLock.Lock()
+	defer s.offersLock.Unlock()
+
+	matches := s.scheduler.MatchOffers(s.offers, lrpAuctions, taskAuctions)
+	results := s.scheduleMatched(s.driver, matches)
+	s.auctionRunner.writeAuctionResults(results)
+
+	s.offers = nil
+	s.holdOffer = false
+}
+func (s *DiegoScheduler) scheduleMatched(driver sched.SchedulerDriver, matches map[string]*OfferMatch) auctiontypes.AuctionResults {
+	results := auctiontypes.AuctionResults{}
+
+	for slaveId, match := range(matches) {
+		if (slaveId != "") {
+			offers := match.Offers
+
+			taskInfos := []*mesos.TaskInfo{}
+			for _, lrpAuction := range(match.LrpAuctions) {
+				taskInfo := s.createLrpTaskInfo(util.NewSlaveID(slaveId), &lrpAuction)
+				taskInfos = append(taskInfos, taskInfo)
+				results.SuccessfulLRPs = append(results.SuccessfulLRPs, lrpAuction)
+				log.Infof("+scheduled lrp, lrp: %v/%v mem: %v, offers: mem: %v",
+					lrpAuction.ProcessGuid, lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(offers))
+			}
+			for _, taskAuction := range(match.TaskAuctions) {
+				taskInfo := s.createTaskTaskInfo(util.NewSlaveID(slaveId), &taskAuction)
+				taskInfos = append(taskInfos, taskInfo)
+				results.SuccessfulTasks = append(results.SuccessfulTasks, taskAuction)
+				log.Infof("+scheduled task, task: %v mem: %v, offers: mem: %v",
+					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(offers))
+			}
+
+			driver.LaunchTasks(extractOfferIds(offers), taskInfos, // offer getting declied if no tasks
+				&mesos.Filters{RefuseSeconds: proto.Float64(30)})
+
+		} else {
+			for _, lrpAuction := range(match.LrpAuctions) {
+				results.FailedLRPs = append(results.FailedLRPs, lrpAuction)
+				log.Warningf("+schedule lrp failed, lrp: %v/%v mem: %v, offers: mem: %v",
+					lrpAuction.GetProcessGuid(), lrpAuction.Index, lrpAuction.MemoryMB, getOffersMem(match.Offers))
+			}
+			for _, taskAuction := range(match.TaskAuctions) {
+				results.FailedTasks = append(results.FailedTasks, taskAuction)
+				log.Warningf("+schedule task failed, task: %v mem: %v, offers: mem: %v",
+					taskAuction.TaskGuid, taskAuction.MemoryMB, getOffersMem(match.Offers))
+			}
 		}
 	}
+
+	return results
+}
+
+
+func (s *DiegoScheduler) _doSchedule() {
+	lrpAuctions, taskAuctions := s.auctionRunner.collectAuctions(0)
+	s.schedule(lrpAuctions, taskAuctions)
+}
+func (s *DiegoScheduler) waitingForAuctioning() {
+	for {
+		select {
+		case <-s.auctionRunner.HasWork:
+			s.offersLock.Lock()
+			if !s.holdOffer {
+				s.holdOffer = true
+				s.driver.ReviveOffers()
+				time.AfterFunc(1 * time.Second, s._doSchedule)
+			}
+			s.offersLock.Unlock()
+		}
+	}
+
 }
 
 func (s *DiegoScheduler) createLrpTaskInfo(slaveId *mesos.SlaveID, lrpAuction *auctiontypes.LRPAuction) *mesos.TaskInfo {

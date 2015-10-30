@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"sort"
-	log "github.com/golang/glog"
 
 	mesos "github.com/mesos/mesos-go/mesosproto"
 
@@ -97,7 +96,6 @@ func (s *SpreadScheduler)MatchOffers(offers []*mesos.Offer, lrpAuctions []auctio
 
 	for _, lrpAuction := range lrpAuctions {
 		sort.Sort(spreadSortableOfferAggregatesForLrp{offerAggregates: offerAggregates, registry: s.registry, pendingRegistry: s.pendingRegistry, lrpGuid: lrpAuction.ProcessGuid})
-		log.Info("--offerAggregates: ", offerAggregates)
 		_, offers := matchLrpAuction(offerAggregates, &lrpAuction)
 		if offers != nil {
 			matches[offers[0].SlaveId.GetValue()].LrpAuctions = append(matches[offers[0].SlaveId.GetValue()].LrpAuctions, lrpAuction)
