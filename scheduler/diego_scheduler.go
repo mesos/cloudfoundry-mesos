@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"time"
 	"sync"
 	"encoding/json"
 
@@ -18,7 +17,6 @@ import (
 
 type DiegoScheduler struct {
 	executor     *mesos.ExecutorInfo
-	auctionRunner *AuctionRunner
 
 	holdOffer bool
 	offers []*mesos.Offer
@@ -30,7 +28,7 @@ type DiegoScheduler struct {
 	driver sched.SchedulerDriver
 }
 
-func NewDiegoScheduler(exec *mesos.ExecutorInfo, auctionRunner *AuctionRunner) *DiegoScheduler {
+func NewDiegoScheduler(exec *mesos.ExecutorInfo) *DiegoScheduler {
 	registry := NewTaskRegistry()
 
 	var scheduler SchedulerInterface
@@ -42,7 +40,6 @@ func NewDiegoScheduler(exec *mesos.ExecutorInfo, auctionRunner *AuctionRunner) *
 
 	return &DiegoScheduler{
 		executor: exec,
-		auctionRunner: auctionRunner,
 		registry: registry,
 		scheduler: scheduler,
 	}
@@ -51,7 +48,6 @@ func NewDiegoScheduler(exec *mesos.ExecutorInfo, auctionRunner *AuctionRunner) *
 func (s *DiegoScheduler) Registered(driver sched.SchedulerDriver, frameworkId *mesos.FrameworkID, masterInfo *mesos.MasterInfo) {
 	log.Infoln("Framework Registered with Master ", masterInfo)
 	s.driver = driver
-	go s.waitingForAuctioning()
 }
 func (s *DiegoScheduler) Reregistered(driver sched.SchedulerDriver, masterInfo *mesos.MasterInfo) {
 	log.Infoln("Framework Re-Registered with Master ", masterInfo)
@@ -123,16 +119,17 @@ func (s *DiegoScheduler) Error(_ sched.SchedulerDriver, err string) {
 	log.Errorf("Scheduler received error:", err)
 }
 
-func (s *DiegoScheduler) schedule(lrpAuctions []auctiontypes.LRPAuction, taskAuctions []auctiontypes.TaskAuction) {
+func (s *DiegoScheduler) Schedule(lrpAuctions []auctiontypes.LRPAuction, taskAuctions []auctiontypes.TaskAuction) auctiontypes.AuctionResults {
 	s.offersLock.Lock()
 	defer s.offersLock.Unlock()
 
 	matches := s.scheduler.MatchOffers(s.offers, lrpAuctions, taskAuctions)
 	results := s.scheduleMatched(s.driver, matches)
-	s.auctionRunner.writeAuctionResults(results)
 
 	s.offers = nil
 	s.holdOffer = false
+
+	return results
 }
 func (s *DiegoScheduler) scheduleMatched(driver sched.SchedulerDriver, matches map[string]*OfferMatch) auctiontypes.AuctionResults {
 	results := auctiontypes.AuctionResults{}
@@ -177,25 +174,13 @@ func (s *DiegoScheduler) scheduleMatched(driver sched.SchedulerDriver, matches m
 	return results
 }
 
-
-func (s *DiegoScheduler) _doSchedule() {
-	lrpAuctions, taskAuctions := s.auctionRunner.collectAuctions(0)
-	s.schedule(lrpAuctions, taskAuctions)
-}
-func (s *DiegoScheduler) waitingForAuctioning() {
-	for {
-		select {
-		case <-s.auctionRunner.HasWork:
-			s.offersLock.Lock()
-			if !s.holdOffer {
-				s.holdOffer = true
-				s.driver.ReviveOffers()
-				time.AfterFunc(1 * time.Second, s._doSchedule)
-			}
-			s.offersLock.Unlock()
-		}
+func (s *DiegoScheduler) HoldOffers() {
+	s.offersLock.Lock()
+	if !s.holdOffer {
+		s.holdOffer = true
+		s.driver.ReviveOffers()
 	}
-
+	s.offersLock.Unlock()
 }
 
 func (s *DiegoScheduler) createLrpTaskInfo(slaveId *mesos.SlaveID, lrpAuction *auctiontypes.LRPAuction) *mesos.TaskInfo {

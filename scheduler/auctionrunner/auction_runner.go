@@ -1,10 +1,14 @@
-package scheduler
+package auctionrunner
 
 import (
 	"os"
+	"sync"
 	"time"
 
 	log "github.com/golang/glog"
+
+	sched "github.com/mesos/mesos-go/scheduler"
+	"github.com/jianhuiz/diego-mesos-auction/scheduler"
 
 	"github.com/pivotal-golang/clock"
 	"github.com/pivotal-golang/lager"
@@ -21,75 +25,91 @@ type AuctionRunner struct {
 	metricEmitter  auctiontypes.AuctionMetricEmitterDelegate
 	clock          clock.Clock
 	workPool       *workpool.WorkPool // not used
-	logger         lager.Logger
-	// TODO: channels not needed any more, use member variable should be more effeicent
-	LrpAuctions    chan auctiontypes.LRPAuction
-	TaskAuctions   chan auctiontypes.TaskAuction
-	AuctionResults chan auctiontypes.AuctionResults
-	HasWork         chan struct{}
+	logger         lager.Logger // not used
+
+	lrpAuctions    []auctiontypes.LRPAuction
+	taskAuctions   []auctiontypes.TaskAuction
+	lock           sync.RWMutex
+	HasWork        chan struct{}
+
+	scheduler      *scheduler.DiegoScheduler
+	driver *sched.MesosSchedulerDriver
 }
 
-func NewAuctionRunner(
+func New(
 	delegate auctiontypes.AuctionRunnerDelegate,
 	metricEmitter auctiontypes.AuctionMetricEmitterDelegate,
 	clock clock.Clock,
 	workPool *workpool.WorkPool,
 	logger lager.Logger,
 ) *AuctionRunner {
+	scheduler, driver := scheduler.InitializeScheduler()
+
 	return &AuctionRunner{
 		delegate:      delegate,
 		metricEmitter: metricEmitter,
 		clock:         clock,
 		workPool:      workPool,
 		logger:        logger,
-		LrpAuctions:   make(chan auctiontypes.LRPAuction, 100),
-		TaskAuctions:  make(chan auctiontypes.TaskAuction, 100),
-		AuctionResults: make(chan auctiontypes.AuctionResults, 100),
 		HasWork:        make(chan struct{}, 1),
+		scheduler:     scheduler,
+		driver:        driver,
 	}
 }
 
 func (a *AuctionRunner) Run(signals <-chan os.Signal, ready chan<- struct{}) error {
 	close(ready)
+	status, err := a.driver.Start()
+	if (err != nil) {
+		log.Fatalf("failed to start mesos scheduler driver, status: %s, err: %v\n", status, err)
+		return err
+	}
 
 	for {
 		select {
-		case auctionResults := <- a.AuctionResults:
-			logger := a.logger.Session("auction")
-			logger.Info("scheduled", lager.Data{
-				"successful-lrp-start-auctions": len(auctionResults.SuccessfulLRPs),
-				"successful-task-auctions":      len(auctionResults.SuccessfulTasks),
-				"failed-lrp-start-auctions":     len(auctionResults.FailedLRPs),
-				"failed-task-auctions":          len(auctionResults.FailedTasks),
-			})
+		case <- a.HasWork:
+			a.scheduler.HoldOffers()
+			lrpAuctions, taskAuctions := a.collectAuctions(1 * time.Second)
+			auctionResults := a.scheduler.Schedule(lrpAuctions, taskAuctions)
+
+			log.Infof("scheduled successful lrps: %d, successful tasks: %d, failed lrps: %d, failed tasks: %d\n",
+				len(auctionResults.SuccessfulLRPs),	len(auctionResults.SuccessfulTasks),
+				len(auctionResults.FailedLRPs), len(auctionResults.FailedTasks))
 
 			a.metricEmitter.AuctionCompleted(auctionResults)
 			a.delegate.AuctionCompleted(auctionResults)
 		case <-signals:
+			a.driver.Abort()
 			return nil
 		}
 	}
 }
 
 func (a *AuctionRunner) ScheduleLRPsForAuctions(lrpStarts []auctioneer.LRPStartRequest) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
 	now := a.clock.Now()
 	for _, start := range lrpStarts {
 		log.Infof("+lrp auction posted: %v: %v\n", start.ProcessGuid, start.Indices)
 		for _, i := range start.Indices {
 			lrpKey := models.NewActualLRPKey(start.ProcessGuid, int32(i), start.Domain)
 			auction := auctiontypes.NewLRPAuction(rep.NewLRP(lrpKey, start.Resource), now)
-			a.LrpAuctions <- auction
+			a.lrpAuctions = append(a.lrpAuctions, auction)
 		}
 	}
 	a.claimToHaveWork()
 }
 
 func (a *AuctionRunner) ScheduleTasksForAuctions(tasks []auctioneer.TaskStartRequest) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
 	now := a.clock.Now()
 	for _, task := range tasks {
 		log.Infof("+task auction posted: %v: %v\n", task.TaskGuid)
 		auction := auctiontypes.NewTaskAuction(task.Task, now)
-		a.TaskAuctions <- auction
+		a.taskAuctions = append(a.taskAuctions, auction)
 	}
 	a.claimToHaveWork()
 }
@@ -104,32 +124,34 @@ func (a *AuctionRunner) claimToHaveWork() {
 func (a *AuctionRunner) collectAuctions(timeout time.Duration) (
 		lrpAuctions []auctiontypes.LRPAuction, taskAuctions []auctiontypes.TaskAuction) {
 	if timeout > 0 { time.Sleep(timeout) }
+
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
 	presentLRPAuctions := map[string]bool{}
 	presentTaskAuctions := map[string]bool{}
-	for {
-		select {
-		case lrpAuction := <-a.LrpAuctions:
-			id := lrpAuction.Identifier()
-			if !presentLRPAuctions[id] {
-				lrpAuctions = append(lrpAuctions, lrpAuction)
-			}
-			presentLRPAuctions[id] = true
-		case taskAuction := <-a.TaskAuctions:
-			id := taskAuction.Identifier()
-			if !presentTaskAuctions[id] {
-				taskAuctions = append(taskAuctions, taskAuction)
-			}
-			presentTaskAuctions[id] = true
-		case <-a.HasWork:
-		default:
-			return
+	for _, lrpAuction := range a.lrpAuctions {
+		id := lrpAuction.Identifier()
+		if !presentLRPAuctions[id] {
+			lrpAuctions = append(lrpAuctions, lrpAuction)
 		}
+		presentLRPAuctions[id] = true
 	}
-}
+	for _, taskAuction := range a.taskAuctions {
+		id := taskAuction.Identifier()
+		if !presentTaskAuctions[id] {
+			taskAuctions = append(taskAuctions, taskAuction)
+		}
+		presentTaskAuctions[id] = true
+	}
 
-func (a *AuctionRunner) writeAuctionResults(results auctiontypes.AuctionResults) {
-	if (len(results.SuccessfulLRPs) > 0 || len(results.FailedLRPs) > 0 ||
-	len(results.SuccessfulTasks) > 0 || len(results.FailedTasks) > 0) {
-		a.AuctionResults <- results;
+	a.lrpAuctions = nil
+	a.taskAuctions = nil
+
+	select {
+	case <-a.HasWork:
+	default:
 	}
+
+	return
 }

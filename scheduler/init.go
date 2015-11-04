@@ -30,7 +30,7 @@ var (
 	mesosAuthSecretFile = flag.String("mesos_authentication_secret_file", "", "Mesos authentication secret file.")
 )
 
-func InitializeScheduler(auctionRunner *AuctionRunner) *SchedulerRunner {
+func InitializeScheduler() (*DiegoScheduler, *sched.MesosSchedulerDriver) {
 	exec := prepareExecutorInfo()
 	fwinfo := &mesos.FrameworkInfo{
 		User: proto.String(""), // Mesos-go will fill in user.
@@ -51,7 +51,7 @@ func InitializeScheduler(auctionRunner *AuctionRunner) *SchedulerRunner {
 	}
 	bindingAddress := parseIP(*address)
 
-	digoScheduler := NewDiegoScheduler(exec, auctionRunner)
+	digoScheduler := NewDiegoScheduler(exec)
 	config := sched.DriverConfig{
 		Scheduler:      digoScheduler,
 		Framework:      fwinfo,
@@ -70,7 +70,7 @@ func InitializeScheduler(auctionRunner *AuctionRunner) *SchedulerRunner {
 		log.Fatal("Unable to create a SchedulerDriver ", err.Error())
 	}
 
-	return NewSchedulerRunner(driver)
+	return digoScheduler, driver
 
 }
 
