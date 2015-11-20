@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	exec "github.com/mesos/mesos-go/executor"
-	"github.com/jianhuiz/diego-mesos-auction/executor"
 )
 
 
@@ -18,7 +17,7 @@ func main() {
 	fmt.Println("Starting Diego Executor")
 
 	dconfig := exec.DriverConfig{
-		Executor: executor.NewDiegoExecutor(),
+		Executor: NewDiegoExecutor(),
 	}
 	driver, err := exec.NewMesosExecutorDriver(dconfig)
 

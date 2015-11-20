@@ -22,6 +22,7 @@ var (
 	consulServer = flag.String("consul_server", "", "CloudFoundry Consul server to join")
 	etcdUrl = flag.String("etcd_url", "", "CloudFoundry ETCD URL")
 	auctionStrategy = flag.String("auction_strategy", "binpack", "<binpadk|spread> Strategy when scheduling auctions")
+	executorImage = flag.String("executor_image", "jianhuiz/diego-cell", "Docker image of the mesos diego executor (executor + diego cell)")
 	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
 	authProvider = flag.String("mesos_authentication_provider", sasl.ProviderName,
 		fmt.Sprintf("Authentication provider to use, default is SASL that supports mechanisms: %+v", mech.ListSupported()))
@@ -103,7 +104,7 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 				},
 			},
 			Docker: &mesos.ContainerInfo_DockerInfo{
-				Image: proto.String("jianhuiz/diego-cell"),
+				Image: executorImage,
 				Network: &containerNetwork,
 				Privileged: proto.Bool(true),
 				ForcePullImage: proto.Bool(true),
@@ -114,15 +115,16 @@ func prepareExecutorInfo() *mesos.ExecutorInfo {
 				Variables: []*mesos.Environment_Variable {
 					&mesos.Environment_Variable{
 						Name: proto.String("CONSUL_SERVER"),
-						Value: proto.String(*consulServer),
+						Value: consulServer,
 					},
 					&mesos.Environment_Variable{
 						Name: proto.String("ETCD_URL"),
-						Value: proto.String(*etcdUrl),
+						Value: etcdUrl,
 					},
 				},
 			},
 			Shell: proto.Bool(false),
+			User: proto.String("root"),
 			Value: proto.String("/executor"),
 			Arguments: []string{ "-logtostderr=true" },
 		},

@@ -1,4 +1,4 @@
-package executor
+package main
 
 import (
 	"fmt"
@@ -99,6 +99,7 @@ func (e *DiegoExecutor) watchTasks(driver exec.ExecutorDriver) {
 			for _, lrp := range state.LRPs {
 				repContainerSet[lrp.Identifier()] = true
 			}
+			// require patch to rep so diego tasks can be returned
 			for _, task := range state.Tasks {
 				repContainerSet[task.Identifier()] = true
 			}
@@ -128,7 +129,7 @@ func (e *DiegoExecutor) watchTasks(driver exec.ExecutorDriver) {
 			// nothing running, abort if been idle for a while
 			if len(state.LRPs) == 0 && len(state.Tasks) == 0 && len(e.taskStateMap) == 0 {
 				timeInIdle += (1*time.Second)
-				if timeInIdle >= 5*time.Second {
+				if timeInIdle >= 10*time.Second {
 					driver.Abort()
 				}
 			} else {
