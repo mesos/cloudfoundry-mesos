@@ -1,22 +1,23 @@
 ## CloudFoundry-Mesos
 
-CloudFoundry-Mesos replaces the auctioning process of CloudFoundry Diego with Mesos, and make the Diego auctioneer as a Mesos framework. This project starts as a PoC and is currently under development. The idea is to let CloudFoundry be able to share the same Mesos cluster with other frameworks to get better resource utilization and possibly improve the scalability.
+CloudFoundry-Mesos replaces the current auctioning process of CloudFoundry Diego with "Mesos Offers" and at the same time makes the Diego auctioneer component as a Mesos framework. This is a very initial version of the framework and is a work-in-progress. In the coming days and weeks, all of us as a community will keep refining these details as we go along. The main goal is to achieve “Improvements in Resource Management and Efficiencies as well as overall Scalability” across all applications frameworks, including Cloud Foundry PaaS environment. 
+
 
 ## Implementation
 
 * __Create Mesos scheduler and executor__. The scheduler provides two strategies, `binpack` which tries to put CloudFoundry apps into as few cells as possible, and `spread` which is the opposite. Both the strategies base on the RAM usage and the implementation is simply for demo purpose. The executor uses `rep` API to launch and monitor Diego `Tasks` and `LRPs`.
 * __Pack Diego `cell` into Docker image__ to minimize the Mesos Slave host system dependency and be able to create a cell on the fly. Due to `Garden-Linux` requirements, the Docker Container is started privileged, uses host network. It also maps two directories for storing data and logs. The executor is packed into this image as well.
 
-    It is considered to make Mesos __[Garden](https://github.com/cloudfoundry-incubator/garden) aware__ so Mesos will see the detail resource usage of each container and there will be container in container stuff.
+    In the future, we are planning to __make Mesos [Garden](https://github.com/cloudfoundry-incubator/garden) aware__ so that Mesos can directly see the detail resource usage of each running garden container. There will be no need for nesting the Garden container within the Docker container.
 
 * __Create a new `auctionrunner`__ that collects the `auctions` and hands them to the Mesos scheduler.
 * __Patch `auctioneer`__ by replace the `auctionrunner` package.
 * __Patch `rep`__ so the `/state` API would return not only `LRPs` but the `Tasks` as well (no longer needed in latest version).
 
 
-## Fetures on Mesos
+## Features on Mesos
 
-* __On-demand resource allocation__. CloudFoundry Diego cells are created automatically up to the Mesos cluster size and removed if not needed.
+* __On-demand resource allocation__. CloudFoundry Diego cells are created dynamically and get removed if not needed.
 * __Resource sharing__. So the same Mesos cluster can run multiple frameworks for jobs such as Hadoop, Spark, Redis, etc.
 * __Scheduling algorithm customization__.
 * __Mesos scales to 10,000s of nodes__. This may help increase the CloudFoundry cluster size.
