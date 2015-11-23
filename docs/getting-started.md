@@ -9,14 +9,16 @@ This guide applies to the HEAD of the source tree and currently tested only with
 
 ## Deploy CloudFoundry Diego
 
-Cloudfoundry-Diego currently tested only with `CloudFoundry v219`, `Diego v0.1434.0` and `Garden Linux v0.307.0`. Please refer to [the Diego release document](https://github.com/cloudfoundry-incubator/diego-release) to deploy the specified version.
+Cloudfoundry-Diego is currently tested only with `CloudFoundry v219`, `Diego v0.1434.0` and `Garden Linux v0.307.0`. Please refer to [the Diego release document](https://github.com/cloudfoundry-incubator/diego-release) to deploy the specified version.
 
-CloudFoundry has two run-time environment, `DEA` and `Diego`, by default the app will be deployed to DEA which is not supported by CloudFoundry-Mesos. Please set the Cloud Controller property `default_to_diego_backend` to `true` in the manifest file when deploying CloudFoundry.
+CloudFoundry has two run-time environments, `DEA` and `Diego`.
+By default the CloudFoundry apps will be deployed in the DEA environment which is currently not supported by CloudFoundry-Mesos.
+Please set the Cloud Controller property `default_to_diego_backend` to `true` in the manifest file when deploying CloudFoundry.
 
 
 ## Deploy Mesos
 
-Cloudfoundry-Diego works with Mesos 0.25.0, the host OS should be `Ubuntu 14.04` (Other distributions not tested) with `Docker 1.8.2` or later installed.
+Cloudfoundry-Diego works with Mesos 0.25.0, the host OS should be `Ubuntu 14.04` (Other distributions are not tested) with `Docker 1.8.2` or later installed.
 
 Please follow the [Mesos](http://mesos.apache.org/gettingstarted/) and/or [MESOSPHERE](https://mesosphere.com/downloads/) documents to install and start a Mesos cluster.
 
@@ -52,9 +54,13 @@ Build the Mesos executor binary is easy
 $ cd ../../../../mesos/cloudfoundry-mesos/executor/
 $ go build
 ```
-In order to create Diego cells dynamically, this project packs the executor binary together with all the Diego cell jobs in to a big Docker image. Starting this container will config and start Diego cell jobs (consul, metron, rep and garden) and launch the Mesos executor. Note that in order for Diego's `Garden-Linux` to work, the cell container should be running with `host` network and in `privileged` mode.
+In order to create Diego cells dynamically, this project packs the executor binary together with all the Diego cell jobs in to a big Docker image.
+Starting this Docker container will configure and start Diego cell jobs (consul, metron, rep and garden) and also launch the Mesos executor.
+Note that in order for Diego's `Garden-Linux` to work, the cell container should be running with `host` networking and in `privileged` mode.
 
-The docker images is current manually created in pushed to Docker hub at `jianhuiz/diego-cell:219-1434-307`. You can pull the image and do the customize on top of it. The creation of the image include compile and package CloudFoundry/Diego/Garden binaries and patch the startup scripts. We will automate the image creation and publish the details later.
+The docker image is current manually created and pushed to Docker hub at `jianhuiz/diego-cell:219-1434-307`. You can pull the image and do the customizations on top of it.
+The creation of the image includes compilation and packaging of CloudFoundry/Diego/Garden binaries and patching the startup scripts.
+We will automate the image creation and publish the details at a later time.
 
 ## Replace the `auctioneer`
 
