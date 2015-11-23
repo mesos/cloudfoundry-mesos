@@ -60,3 +60,6 @@ If you are not familiar with CloudFoundry or Mesos, the following documents woul
 * Put other Cloud Foundry components on Mesos?
     * Scale other CF components (such as `router` for example)
 
+
+## Contributing
+Contributions are welcome. Please refer to [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for guidelines.
