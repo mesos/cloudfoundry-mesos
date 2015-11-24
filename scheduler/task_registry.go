@@ -69,14 +69,7 @@ func (r *TaskRegistry) RemoveTask(slaveId string, guid string) {
 }
 
 func (r *TaskRegistry) HasLrpOrTask(slaveId string) bool {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-
-	slaveInfo, exists := r.slaveMap[slaveId]
-	if !exists { return false }
-	if len(slaveInfo.Lrps) > 0 { return true }
-	if len(slaveInfo.Tasks) > 0 { return true }
-	return false
+	return r.LrpAndTaskCount(slaveId) > 0
 }
 
 func (r *TaskRegistry) LrpCount(slaveId string) int {
