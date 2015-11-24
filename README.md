@@ -30,6 +30,7 @@ CloudFoundry-Mesos replaces the current auctioning process of CloudFoundry Diego
 * __Scheduling Algorithm Customization__.
 * __Mesos scales up to 10,000s of nodes__. This may help increase the CloudFoundry cluster size.
 
+Please find the [demo video](https://youtu.be/2XZK3Mu32-s) on YouTube.
 
 ## Usage
 
