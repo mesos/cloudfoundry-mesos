@@ -23,7 +23,8 @@ var (
 	etcdUrl = flag.String("etcd_url", "", "CloudFoundry ETCD URL")
 	auctionStrategy = flag.String("auction_strategy", "binpack", "<binpadk|spread> Strategy when scheduling auctions")
 	executorImage = flag.String("executor_image", "jianhuiz/diego-cell", "Docker image of the mesos diego executor (executor + diego cell)")
-	address = flag.String("address", "127.0.0.1", "Binding address for artifact server")
+	bindingAddress = flag.String("binding_address", "127.0.0.1", "Which address to bind and listen for mesos master")
+	publishedAddress = flag.String("published_address", "", "Which address mesos master connects to this scheduler. Defaults to binding address.")
 	authProvider = flag.String("mesos_authentication_provider", sasl.ProviderName,
 		fmt.Sprintf("Authentication provider to use, default is SASL that supports mechanisms: %+v", mech.ListSupported()))
 	master              = flag.String("master", "127.0.0.1:5050", "Master address <ip:port>")
@@ -42,7 +43,7 @@ func InitializeScheduler() (*DiegoScheduler, *sched.MesosSchedulerDriver) {
 	if *mesosAuthPrincipal != "" {
 		fwinfo.Principal = proto.String(*mesosAuthPrincipal)
 		secret_bytes, err := ioutil.ReadFile(*mesosAuthSecretFile)
-		secret = string(secret_bytes[:])
+		secret := string(secret_bytes[:])
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -51,7 +52,11 @@ func InitializeScheduler() (*DiegoScheduler, *sched.MesosSchedulerDriver) {
 			Secret:    &secret,
 		}
 	}
-	bindingAddress := parseIP(*address)
+	bindingAddressParsed := parseIP(*bindingAddress)
+	publishedAddressParsed := bindingAddressParsed
+	if *publishedAddress != "" {
+		publishedAddressParsed = parseIP(*publishedAddress)
+	}
 
 	digoScheduler := NewDiegoScheduler(exec)
 	config := sched.DriverConfig{
@@ -59,10 +64,11 @@ func InitializeScheduler() (*DiegoScheduler, *sched.MesosSchedulerDriver) {
 		Framework:      fwinfo,
 		Master:         *master,
 		Credential:     cred,
-		BindingAddress: bindingAddress,
+		BindingAddress: bindingAddressParsed,
+		PublishedAddress: publishedAddressParsed,
 		WithAuthContext: func(ctx context.Context) context.Context {
 			ctx = auth.WithLoginProvider(ctx, *authProvider)
-			ctx = sasl.WithBindingAddress(ctx, bindingAddress)
+			ctx = sasl.WithBindingAddress(ctx, bindingAddressParsed)
 			return ctx
 		},
 	}
