@@ -41,13 +41,14 @@ func InitializeScheduler() (*DiegoScheduler, *sched.MesosSchedulerDriver) {
 	cred := (*mesos.Credential)(nil)
 	if *mesosAuthPrincipal != "" {
 		fwinfo.Principal = proto.String(*mesosAuthPrincipal)
-		secret, err := ioutil.ReadFile(*mesosAuthSecretFile)
+		secret_bytes, err := ioutil.ReadFile(*mesosAuthSecretFile)
+		secret = string(secret_bytes[:])
 		if err != nil {
 			log.Fatal(err)
 		}
 		cred = &mesos.Credential{
 			Principal: proto.String(*mesosAuthPrincipal),
-			Secret:    secret,
+			Secret:    &secret,
 		}
 	}
 	bindingAddress := parseIP(*address)
